@@ -4,6 +4,10 @@ import (
 	"database/sql"
 	"fmt"
 	"jolly-roger/web-service-exercise/defs"
+	"log"
+	"os"
+
+	"github.com/joho/godotenv"
 )
 
 func GetAlbums() ([]defs.Album, error) {
@@ -32,13 +36,25 @@ func GetAlbums() ([]defs.Album, error) {
 }
 
 func GetAlbumByID(id int64) (defs.Album, error) {
-	var album defs.Album
+	godotenv.Load()
 
-	row := db.QueryRow("SELECT * FROM album WHERE id = ?", id)
+	var (
+		useDbPostgres = os.Getenv("USE_DB_POSTGRES")
+		album         defs.Album
+		row           *sql.Row
+	)
+
+	if useDbPostgres != "" {
+		row = db.QueryRow("SELECT * FROM album WHERE id = $1", id)
+	} else {
+		row = db.QueryRow("SELECT * FROM album WHERE id = ?", id)
+	}
+
 	if err := row.Scan(&album.ID, &album.Title, &album.Artist, &album.Price); err != nil {
 		if err == sql.ErrNoRows {
 			return album, fmt.Errorf("albumByID %d: no such album", id)
 		}
+
 		return album, fmt.Errorf("albumByID %d: %v", id, err)
 	}
 
@@ -46,14 +62,38 @@ func GetAlbumByID(id int64) (defs.Album, error) {
 }
 
 func AddAlbum(alb defs.Album) (int64, error) {
-	result, err := db.Exec("INSERT INTO album (title, artist, price) VALUES (?, ?, ?)", alb.Title, alb.Artist, alb.Price)
-	if err != nil {
-		return 0, fmt.Errorf("addAlbum: %v", err)
-	}
+	godotenv.Load()
 
-	id, err := result.LastInsertId()
-	if err != nil {
-		return 0, fmt.Errorf("addAlbum: %v", err)
+	var (
+		useDbPostgres = os.Getenv("USE_DB_POSTGRES")
+		id            int64
+	)
+
+	if useDbPostgres != "" {
+		row := db.QueryRow("INSERT INTO album (title, artist, price) VALUES ($1, $2, $3) returning id", alb.Title, alb.Artist, alb.Price)
+
+		if err := row.Scan(&id); err != nil {
+			return id, fmt.Errorf("addAlbum: %v", err)
+		}
+	} else {
+		var (
+			err    error
+			result sql.Result
+		)
+
+		result, err = db.Exec("INSERT INTO album (title, artist, price) VALUES (?, ?, ?)", alb.Title, alb.Artist, alb.Price)
+
+		if err != nil {
+			return 0, fmt.Errorf("addAlbum: %v", err)
+		}
+
+		id, err = result.LastInsertId()
+		if err != nil {
+
+			log.Panicln(err)
+
+			return 0, fmt.Errorf("addAlbum: %v", err)
+		}
 	}
 
 	return id, nil
